@@ -1,0 +1,154 @@
+---
+title: "Intro to the Arrow Package"
+author: "Ted Laderas"
+date: "8/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(arrow)
+```
+
+# What is Apache Arrow?
+
+Apache Arrow is a C++ library that enables you to load and work with data in a variety of formats. It focuses on *column* oriented storage of data, which enables very fast loading and searching of data.
+
+## What is it for?
+
+Among the many applications of the `{arrow}` package, two of the most accessible are:
+
+-   High-performance reading and writing of data files with multiple file formats and compression codecs, including built-in support for cloud storage
+-   Analyzing and manipulating bigger-than-memory data with `dplyr` verbs
+
+## Some of the {arrow} use cases
+
+-   **Analyze**, **process**, and **write** multi-file, larger-than-memory datasets (`open_dataset()`, `write_dataset()`)
+-   **Read** large CSV and JSON files with excellent speed and efficiency (`read_csv_arrow()`, `read_json_arrow()`)
+-   **Read** and **write** Parquet files (`read_parquet()`, `write_parquet()`), an efficient and widely used columnar format
+-   **Read** and **write** Feather files (`read_feather()`, `write_feather()`), a format optimized for speed and interoperability
+
+## What is Columnar Storage?
+
+<https://en.wikipedia.org/wiki/Column-oriented_DBMS>
+
+Most of us are familiar with *row* oriented storage. In *row* oriented storage, the unit of storage is a row. All the data in a *row* is stored together.
+
+In a column oriented store, the unit of storage is a *column*. All the data in a *column* is stored together. It turns out for a lot of data queries, *column* oriented storage is faster to search and traverse.
+
+In short, {arrow} lets you convert *row* oriented data into *column* oriented data and take advantage of these speed gains.
+
+The big caveat is that searching a column-oriented store is faster, saving and storing the data is less efficient overall. But for data that isn't changing all the time, it can be worth it.
+
+## Arrow Datasets: access and work with many files at once.
+
+Say you have a folder of `.csv` files, with identical headers. Is there a way to work with these files?
+
+{arrow} has a function called `open_dataset()` that will let us work with these files as if they were a single entity.
+
+Let's open all the files in `data/training` (about 20000 csv files):
+
+```{r}
+ds <- open_dataset("data/training", format="csv", delim = "|")
+ds
+```
+
+## Getting our Dataset into Memory
+
+We can load the entire dataset into memory using `collect()`. Depending on the total dataset size, this can be completely reasonable.
+
+The following code works on my Mac with 16 Gb of RAM, but it chugs on RStudio Cloud.
+
+```{r}
+#don't run this code block on a low memory computer
+ds %>%
+  collect()
+```
+
+`collect()` is a very important verb in `{arrow}`: all operations are not calculated until `collect()` (or `compute()`) is called.
+
+This is because `{arrow}` uses lazy-evaluation. It doesn't execute the `dplyr` pipeline until it has to produce redsults.
+
+Lazy-evaluation is a bit misleading because you think that the operations are instantaneous. Instead, arrow tries to formulate an efficient *plan* to query the data.
+
+## What a lazy package
+
+Underneath it all, our `Dataset` is an `R6` object. The cool thing is that we can work with it using `dplyr` like any other data source. Underneath it all, we are querying all of the separate csv files.
+
+```{r}
+small_ds <- ds %>%
+  filter(Age > 50) %>%
+  filter(Gender == 1) %>%
+  filter(SepsisLabel == 1) %>%
+  select(Age, Gender, SepsisLabel) 
+
+small_ds
+```
+
+Remember, it's not until we run `collect()` that Arrow does anything:
+
+```{r}
+small_ds %>%
+  collect()
+```
+
+We can run `mutate()` on the entire dataset:
+
+```{r}
+ds %>%
+  mutate(age_days = Age * 365) %>%
+  select(Age, Gender, age_days) %>%
+  collect()
+```
+
+Everything is processed in place.
+
+## Limitations of `{arrow}`
+
+There are some limitations. `group_by()/mutate()` and `group_by()/summarize()` operations are not yet implemented in `{arrow}`. You will need to `collect()` the data into memory if you want to do these operations.
+
+```{r}
+#Note: this code block crashes a 4 Gb version of RStudio Cloud
+ds %>%
+  collect() %>%
+  group_by(Gender) %>%
+  summarize(count=n()) 
+```
+
+## What about `{vroom}`?
+
+The `{vroom}` package is another way to load up lots of files. It focuses on getting the data from files into memory as fast as possible.
+
+Depending on your use case, it's worth looking at `{vroom}`. But it does not do the on-disk processing that `{arrow}` does.
+
+## Feather versus Parquet format
+
+You may have heard of the *Parquet* format before. This is a columnar format that is commonly used throughout industry to store data. Underneath it, a *Parquet* file is a folder that contains subfiles. *Parquet* files are made for long-term storage, as part of their goal is compression of files.
+
+<https://databricks.com/glossary/what-is-parquet>
+
+Apache Arrow also adds the *Feather* format. *Feather* files are optimized for fast in-memory access, and tend to be larger than *Parquet* files. Depending on the data, *Feather* files can be up to twice as large as *Parquet* files.
+
+```{r}
+write_dataset(ds, "data/training.feather", format = "feather")
+```
+
+```{r}
+ds_f = open_dataset("data/training.feather", format = "feather")
+```
+
+```{r}
+ds_f %>%
+  filter(Age > 70) %>%
+  filter(Gender == 0) %>%
+  select(HR, O2Sat, Gender, Age) %>%
+  collect()
+
+```
+
+## Partitioned Datasets
+
+One way to enable even faster querying is to convert your data into a *partitioned* dataset. We can separate the files out into separate directories based on a grouping operation.
+
+## Exchange Data between R/Python
