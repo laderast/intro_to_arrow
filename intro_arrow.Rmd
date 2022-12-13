@@ -63,7 +63,8 @@ The following code works on my Mac with 16 Gb of RAM, but it chugs on RStudio Cl
 ```{r}
 #don't run this code block on a low memory computer
 ds %>%
-  collect()
+  collect() %>%
+  head()
 ```
 
 `collect()` is a very important verb in `{arrow}`: all operations are not calculated until `collect()` (or `compute()`) is called.
@@ -72,16 +73,17 @@ This is because `{arrow}` uses lazy-evaluation. It doesn't execute the `dplyr` p
 
 Lazy-evaluation is a bit misleading because you think that the operations are instantaneous. Instead, arrow tries to formulate an efficient *plan* to query the data.
 
-## What a lazy package
+## What a lazy package!
 
-Underneath it all, our `Dataset` is an `R6` object. The cool thing is that we can work with it using `dplyr` like any other data source. Underneath it all, we are querying all of the separate csv files.
+Underneath it all, our `Dataset` is an `R6` object. The cool thing is that we can work with it using `dplyr` like any other data source. Underneath it all, we are querying all of the separate csv files, but it looks like we are querying a single data source.
 
 ```{r}
 small_ds <- ds %>%
   filter(Age > 50) %>%
   filter(Gender == 1) %>%
   filter(SepsisLabel == 1) %>%
-  select(Age, Gender, SepsisLabel) 
+  select(Age, Gender, SepsisLabel) %>%
+  distinct()
 
 small_ds
 ```
@@ -99,21 +101,23 @@ We can run `mutate()` on the entire dataset:
 ds %>%
   mutate(age_days = Age * 365) %>%
   select(Age, Gender, age_days) %>%
-  collect()
+  distinct() %>%
+  collect() %>%
+  head()
 ```
 
 Everything is processed in place.
 
-## Limitations of `{arrow}`
+## Summarizing in `{arrow}`
 
-There are some limitations. `group_by()/mutate()` and `group_by()/summarize()` operations are not yet implemented in `{arrow}`. You will need to `collect()` the data into memory if you want to do these operations.
+`group_by()/mutate()` and `group_by()/summarize()` operations are now implemented in `{arrow}`.
 
 ```{r}
 #Note: this code block crashes a 4 Gb version of RStudio Cloud
-ds %>%
-  collect() %>%
+small_ds %>%
   group_by(Gender) %>%
-  summarize(count=n()) 
+  summarize(count=n()) %>%
+  collect()
 ```
 
 ## What about `{vroom}`?
@@ -151,4 +155,3 @@ ds_f %>%
 
 One way to enable even faster querying is to convert your data into a *partitioned* dataset. We can separate the files out into separate directories based on a grouping operation.
 
-## Exchange Data between R/Python
